@@ -26,6 +26,29 @@ def web_search(query: str) -> str:
 
     return "\n----\n".join(out)
 
+def _sanitize_html(html: str) -> str:
+    """Remove characters XML parsers reject, keeping tab, newline and carriage return."""
+    return re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', '', html)
+
+
+def _text_from_tags(raw_html: str) -> str:
+    """Strip non-content tags and collapse the remaining text into one line."""
+    soup = BeautifulSoup(raw_html, "html.parser")
+
+    for tag in soup([
+        "script",
+        "style",
+        "nav",
+        "footer",
+        "header",
+        "aside",
+        "form"
+    ]):
+        tag.decompose()
+
+    return re.sub(r'\s+', ' ', soup.get_text(separator=" ", strip=True))
+
+
 @tool
 def scrape_url(url: str) -> str:
     """
@@ -43,8 +66,9 @@ def scrape_url(url: str) -> str:
         "Referer": "https://www.google.com/",
     }
 
+    # fetch stage: network failures should return immediately instead of
+    # falling through to the extraction strategies
     try:
-        # fetch page
         response = requests.get(
             url,
             headers=headers,
@@ -52,10 +76,20 @@ def scrape_url(url: str) -> str:
         )
 
         response.raise_for_status()
+    except Timeout:
+        return "Request timed out while scraping the URL."
+    except HTTPError as e:
+        return f"HTTP error occured: {e!s}"
+    except Exception as e:
+        return f"Could not fetch URL: {e!s}"
 
-        html = response.text
+    html = _sanitize_html(response.text)
 
-        # strategy1: trafilatura (best for atricles/blogs)
+    # extraction stage: each strategy is isolated so that a strategy raising
+    # an exception falls through to the next one instead of aborting the chain
+
+    # strategy1: trafilatura (best for atricles/blogs)
+    try:
         extracted = trafilatura.extract(
             html,
             include_comments=False,
@@ -63,56 +97,26 @@ def scrape_url(url: str) -> str:
         )
 
         if extracted and len(extracted.strip()) > 200:
-            cleaned = re.sub(r'\s+', ' ', extracted)
-            return cleaned[:5000]
-
-        # strategy2: readability
-        doc = Document(html)
-        clean_html = doc.summary()
-        
-        soup = BeautifulSoup(clean_html, "html.parser")
-
-        for tag in soup([
-            "script",
-            "style",
-            "nav",
-            "footer",
-            "header",
-            "aside",
-            "form"
-        ]):
-            tag.decompose()
-
-        text = soup.get_text(separator=" ", strip=True)
-
-        if text and len(text.strip()) > 200:
-            cleaned = re.sub(r'\s+', ' ', text)
-            return cleaned[:5000]
-
-        # strategy3: fallback full page extraction
-        soup = BeautifulSoup(html, "html.parser")
-
-        for tag in soup([
-            "script",
-            "style",
-            "nav",
-            "footer",
-            "header",
-            "aside",
-            "form"
-        ]):
-            tag.decompose()
-
-        text = soup.get_text(separator=" ", strip=True)
-        cleaned = re.sub(r'\s+', ' ', text)
-
-        if cleaned:
-            return cleaned[:5000]
-            
-        return "Could not extract meaningful content from the page."
-    except Timeout:
-        return "Request timed out while scraping the URL."
-    except HTTPError as e:
-        return f"HTTP error occured: {e!s}"
+            return re.sub(r'\s+', ' ', extracted)[:5000]
     except Exception as e:
-        return f"Could not scrape URL: {e!s}"
+        print(f"[scrape_url] trafilatura failed: {e!s}")
+
+    # strategy2: readability
+    try:
+        text = _text_from_tags(Document(html).summary())
+
+        if len(text) > 200:
+            return text[:5000]
+    except Exception as e:
+        print(f"[scrape_url] readability failed: {e!s}")
+
+    # strategy3: fallback full page extraction
+    try:
+        text = _text_from_tags(html)
+
+        if text:
+            return text[:5000]
+    except Exception as e:
+        print(f"[scrape_url] full-page extraction failed: {e!s}")
+
+    return "Could not extract meaningful content from the page."

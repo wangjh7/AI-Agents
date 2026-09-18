@@ -1,6 +1,8 @@
-def main():
-    print("Hello from langchain-multi-agent-research-system!")
+from src.pipelines.pipeline import run_research_pipeline
+
+topic = "The impact of AI on the job market in 2026"
+run_research_pipeline(topic)
 
 
-if __name__ == "__main__":
-    main()
+# if __name__ == "__main__":
+#     main()
