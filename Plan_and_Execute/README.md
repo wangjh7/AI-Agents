@@ -151,8 +151,8 @@ flowchart TD
 flowchart TD
     start([开始 history = empty]) --> loop["第 1~max_steps 轮<br/>(默认 6，execute_step 传 4)"]
     loop --> build["① build_prompt"]
-    build --> call["② llm(prompt) → out"]
-    call --> check["③ 含 Final Answer?"]
+    build --> call_llm["② llm(prompt) → out"]
+    call_llm --> check["③ 含 Final Answer?"]
     check -->|是| answer([提取答案返回])
     check -->|否| parse["④ parse_action"]
     parse --> tool["⑤ tools[action].run"]
